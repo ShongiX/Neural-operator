@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch import nn
 import numpy as np
@@ -33,13 +35,14 @@ class FourierLayer(nn.Module):
         self.size_out = size_out
         self.modes = modes
 
-        self.R = nn.Parameter(torch.rand(size_in, size_out, modes, dtype=torch.cfloat))
+        self.R = nn.Parameter(torch.rand(modes, size_in, size_out, dtype=torch.cfloat))
 
     def forward(self, x):
         batchSize = x.shape[0]
         x_ft = torch.fft.fft(x)
+        print(x_ft.shape)
         y = torch.zeros(batchSize, self.size_out, self.modes, device=x.device, dtype=torch.cfloat)
-        y[:, :, :self.modes] = torch.einsum("klj,kjn->kln", self.R, x_ft[:, :self.modes])
+        y[:, :, :self.modes] = torch.einsum("kmn,bn->bmk", self.R[:self.modes, :, :], x_ft)
         x = torch.fft.ifft(y)
         return x
 
