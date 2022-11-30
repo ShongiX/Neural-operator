@@ -1,28 +1,30 @@
-import math
-
 import torch
 from torch import nn
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
 
 k_max = 12
-UPLIFT = 1000
+width = 64
 J = 1000  # number of points in the domain
 batch_size = 20
-
 
 initial = np.load("data/dummyInitial_0.npy")
 target = np.load("data/dummyTarget_0.npy")
 
-for number in range(8):
+for number in range(7):
     initial = np.concatenate((initial, np.load("data/dummyInitial_" + str(number + 1) + ".npy")))
     target = np.concatenate((target, np.load("data/dummyTarget_" + str(number + 1) + ".npy")))
+
+initial = initial.reshape(3200, J, 1)
 
 HeatConductionTrainingDataset = TensorDataset(torch.Tensor(initial), torch.Tensor(target))
 HeatConductionTrainingDataLoader = DataLoader(HeatConductionTrainingDataset, batch_size=batch_size, shuffle=True)
 
 initial = np.load("data/dummyInitial_8.npy")
 target = np.load("data/dummyTarget_8.npy")
+
+initial = initial.reshape(400, J, 1)
 
 HeatConductionValidationDataset = TensorDataset(torch.Tensor(initial), torch.Tensor(target))
 HeatConductionValidationDataLoader = DataLoader(HeatConductionValidationDataset, batch_size=batch_size)
@@ -35,44 +37,51 @@ class FourierLayer(nn.Module):
         self.size_out = size_out
         self.modes = modes
 
-        self.R = nn.Parameter(torch.rand(modes, size_in, size_out, dtype=torch.cfloat))
+        scale = 1 / (size_in*size_out)
+        self.R = nn.Parameter(scale * torch.rand(self.size_in, self.size_out, self.modes, dtype=torch.cfloat))
 
     def forward(self, x):
         batchSize = x.shape[0]
-        x_ft = torch.fft.fft(x)
-        print(x_ft.shape)
-        y = torch.zeros(batchSize, self.size_out, self.modes, device=x.device, dtype=torch.cfloat)
-        y[:, :, :self.modes] = torch.einsum("kmn,bn->bmk", self.R[:self.modes, :, :], x_ft)
-        x = torch.fft.ifft(y)
+        x_ft = torch.fft.rfft(x)
+        y = torch.zeros(batchSize, self.size_out, x.size(-1)//2+1, device=x.device, dtype=torch.cfloat)
+        # print("x = " + str(x_ft.shape))
+        # print("R = " + str(self.R.shape))
+        # print("y = " + str(y.shape))
+        # print(self.size_in)
+
+        y[:, :, :self.modes] = torch.einsum("bnk,nmk->bmk", x_ft[:, :, :self.modes], self.R)
+        x = torch.fft.irfft(y)
         return x
 
 
 class HeatConductionNeuralNetwork(nn.Module):
-    def __init__(self, modes, uplift):
+    def __init__(self, modes, width):
         super(HeatConductionNeuralNetwork, self).__init__()
 
         self.modes = modes
-        self.uplift = uplift
+        self.width = width
 
-        self.P = nn.Linear(J, uplift)  # uplift layer
+        self.P = nn.Linear(1, self.width)  # uplift layer
 
-        self.FL1 = FourierLayer(self.uplift, self.uplift, modes)
-        self.FL2 = FourierLayer(self.uplift, self.uplift, modes)
-        self.FL3 = FourierLayer(self.uplift, self.uplift, modes)
-        self.FL4 = FourierLayer(self.uplift, self.uplift, modes)
+        self.FL1 = FourierLayer(self.width, self.width, self.modes)
+        self.FL2 = FourierLayer(self.width, self.width, self.modes)
+        self.FL3 = FourierLayer(self.width, self.width, self.modes)
+        self.FL4 = FourierLayer(self.width, self.width, self.modes)
 
-        self.W1 = nn.Conv1d(self.uplift, self.uplift, 1)
-        self.W2 = nn.Conv1d(self.uplift, self.uplift, 1)
-        self.W3 = nn.Conv1d(self.uplift, self.uplift, 1)
-        self.W4 = nn.Conv1d(self.uplift, self.uplift, 1)
+        self.W1 = nn.Conv1d(self.width, self.width, 1)
+        self.W2 = nn.Conv1d(self.width, self.width, 1)
+        self.W3 = nn.Conv1d(self.width, self.width, 1)
+        self.W4 = nn.Conv1d(self.width, self.width, 1)
 
-        self.Q = nn.Linear(uplift, J)  # lowering layer
+        self.Q = nn.Linear(self.width, 1)  # lowering layer
 
     def forward(self, x):
         x = self.P(x)
+        x = x.reshape(x.shape[0], x.shape[2], x.shape[1])
+
         v1 = self.FL1(x)
         v2 = self.W1(x)
-        x = nn.functional.relu(v1+v2)
+        x = nn.functional.relu(v1 + v2)
 
         v1 = self.FL2(x)
         v2 = self.W2(x)
@@ -86,6 +95,7 @@ class HeatConductionNeuralNetwork(nn.Module):
         v2 = self.W4(x)
         x = nn.functional.relu(v1 + v2)
 
+        x = x.reshape(x.shape[0], x.shape[2], x.shape[1])
         x = self.Q(x)
         return x
 
@@ -94,13 +104,16 @@ def train_loop(dataloader, model, loss_fn, optimizer):
     size = len(dataloader.dataset)
     for batch, (X, y) in enumerate(dataloader):
         pred = model(X)
+        pred = np.squeeze(pred)
+        # print("pred = " + str(pred.shape))
+        # print("y = " + str(y.shape))
         loss = loss_fn(pred, y)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        if batch % 100 == 0:
+        if batch % 40 == 0:
             loss, current = loss.item(), batch * len(X)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
 
@@ -113,8 +126,19 @@ def test_loop(dataloader, model, loss_fn):
     with torch.no_grad():
         for X, y in dataloader:
             pred = model(X)
+            # print("pred: " + str(pred.shape))
+            # print("y: " + str(y.shape))
+            pred = np.squeeze(pred)
             test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+
+            x = np.linspace(0, 1, 1000)
+            plt.plot(x, y[0, :], 'g')
+            plt.plot(x, pred[0, :], 'b')
+            plt.show()
+
+            # correct += (pred == y).type(torch.float).sum().item()
+            a = ((np.trapz(pred) - np.trapz(y)) < 1)
+            correct += np.count_nonzero(a)
 
     test_loss /= num_batches
     correct /= size
@@ -122,9 +146,9 @@ def test_loop(dataloader, model, loss_fn):
 
 
 def main():
-    model = HeatConductionNeuralNetwork(modes=k_max, uplift=UPLIFT)
+    model = HeatConductionNeuralNetwork(modes=k_max, width=width)
 
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     epochs = 10
