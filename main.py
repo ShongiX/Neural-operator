@@ -161,18 +161,20 @@ def main():
         test_loop(HeatConductionValidationDataLoader, model, loss_fn)
     print("Done! (%s)" % (time.time() - start_time))
 
-    plt.plot(np.linspace(1, 10, 10), validation_loss)
+    # plt.plot(np.linspace(1, 10, 10), validation_loss)
     # plt.plot(validation_loss)
-    plt.title("Average validation loss")
-    plt.show()
+    # plt.title("Average validation loss")
+    # plt.show()
+    #
+    # plt.plot(np.linspace(1, 40, 40), train_loss)
+    # plt.title("Training loss")
+    # plt.show()
+    #
+    # plt.plot(np.linspace(1, 20, 20), train_loss[20:])
+    # plt.title("Training loss")
+    # plt.show()
 
-    plt.plot(np.linspace(1, 40, 40), train_loss)
-    plt.title("Training loss")
-    plt.show()
-
-    plt.plot(np.linspace(1, 20, 20), train_loss[20:])
-    plt.title("Training loss")
-    plt.show()
+    torch.save(model.state_dict(), "model.pth")
 
 
 if __name__ == "__main__":
