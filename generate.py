@@ -20,7 +20,7 @@ T = 0.01
 Nx = int(L / DELTA_X)
 Nt = int(T / DELTA_T)
 
-NUMBER_OF_INITIAL_VALUES = 100
+NUMBER_OF_INITIAL_VALUES = 10
 
 if __name__ == '__main__':
     array_of_u0 = np.zeros((NUMBER_OF_INITIAL_VALUES, Nx))
@@ -54,15 +54,19 @@ if __name__ == '__main__':
             n += 1
 
         # Plotting starting value and final state
-        # plt.plot(u0[0][:])
-        # plt.show()
+        x = np.linspace(0, 1, 1000)
+        plt.plot(x, u0[0][:], 'g')
+        plt.title("Initial function")
+        plt.xlabel("Position along rod")
+        plt.ylabel("Temperature")
+        plt.show()
         # plt.plot(u[0][:])
         # plt.show()
 
         array_of_u0[j] = u0
         array_of_u[j] = u
 
-    np.save("dummyInitial_" + str(args.number), array_of_u0)
-    np.save("dummyTarget_" + str(args.number), array_of_u)
+    np.save("goldInitial_" + str(args.number), array_of_u0)
+    np.save("goldTarget_" + str(args.number), array_of_u)
 
 # np.save("test_" + str(args.number), array)
